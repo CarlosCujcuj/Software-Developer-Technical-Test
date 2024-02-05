@@ -8,6 +8,7 @@ module.exports = {
   PHOTOS_SERVICE_URL,
   ALBUMS_SERVICE_URL,
   USERS_SERVICE_URL,
+  ID_KEY: 'id',
   ALBUM_ID_KEY: 'albumId',
   USER_ID_KEY: 'userId'
 }

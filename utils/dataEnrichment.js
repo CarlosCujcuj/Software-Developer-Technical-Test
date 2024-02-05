@@ -2,7 +2,7 @@ const getItemById = (array, id) => {
   return array.find(item => item.id === id)
 }
 
-const photoEnrinchment = (photos, albums) => {
+const photosEnrinchment = (photos, albums) => {
   return photos.map((photo) => {
     const newPhoto = {
       ...photo,
@@ -27,8 +27,9 @@ const albumsEnrichment = (albums, users) => {
 
 const dataEnrichment = (photos, albums, users) => {
   const albumsEnriched = albumsEnrichment(albums, users)
-  const photosEnriched = photoEnrinchment(photos, albumsEnriched)
+  const photosEnriched = photosEnrinchment(photos, albumsEnriched)
   return photosEnriched
 }
+
 
 module.exports = dataEnrichment
