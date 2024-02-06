@@ -4,6 +4,7 @@ const createError = require('http-errors')
 
 const dataEnrichment = require('../utils/dataEnrichment')
 const intersectData = require('../utils/intersectData')
+const pagination  = require('../utils/pagination')
 const {
   getUniqueValues,
   filterItemsContainingValue,
@@ -24,7 +25,9 @@ const {
   EMAIL_KEY,
   ALBUM_USER_EMAIL_FILTER,
   ALBUM_TITLE_FILTER,
-  TITLE_FILTER
+  TITLE_FILTER,
+  OFFSET_FILTER,
+  LIMIT_FILTER
 } = require('../constants')
 
 const router = Router()
@@ -44,11 +47,11 @@ const filterQueryParam = (req, res, next) => {
 
 router.get('/', filterQueryParam, async(req, res, next) => {
   let dataEnriched
-  const queryFilters = req.query
+  const filters = req.query
 
-  const hasAlbumUserEmailFilter = queryFilters.hasOwnProperty(ALBUM_USER_EMAIL_FILTER)
-  const hasAlbumTitleFilter = queryFilters.hasOwnProperty(ALBUM_TITLE_FILTER)
-  const hasTitleFilter = queryFilters.hasOwnProperty(TITLE_FILTER)
+  const hasAlbumUserEmailFilter = filters.hasOwnProperty(ALBUM_USER_EMAIL_FILTER)
+  const hasAlbumTitleFilter = filters.hasOwnProperty(ALBUM_TITLE_FILTER)
+  const hasTitleFilter = filters.hasOwnProperty(TITLE_FILTER)
 
   let usersResponse
   let albumsResponse
@@ -84,7 +87,13 @@ router.get('/', filterQueryParam, async(req, res, next) => {
 
     // ======= LOGIC FOR FILTER'S COMBINATIONS =======
 
-    if (hasAlbumTitleFilter && hasTitleFilter) {
+    if (hasAlbumUserEmailFilter && hasAlbumTitleFilter && hasTitleFilter) {
+      const { photosIntersect, albumsIntersect, usersIntersect } = intersectData(photosFiltered, albumsFiltered, usersFiltered)
+
+      dataEnriched = dataEnrichment(photosIntersect, albumsIntersect, usersIntersect)
+    }
+
+    else if (hasAlbumTitleFilter && hasTitleFilter) {
       const { photosIntersect, albumsIntersect } = intersectData(photosFiltered, albumsFiltered, undefined)
 
       const usersId = await getUniqueValues(albumsIntersect, USER_ID_KEY)
@@ -106,13 +115,6 @@ router.get('/', filterQueryParam, async(req, res, next) => {
     else if (hasAlbumUserEmailFilter && hasTitleFilter) {
       albumsResponse = await request(ALBUMS_SERVICE_URL)
       const { photosIntersect, albumsIntersect, usersIntersect } = intersectData(photosFiltered, albumsResponse, usersFiltered)
-
-      dataEnriched = dataEnrichment(photosIntersect, albumsIntersect, usersIntersect)
-    }
-
-
-    else if (hasAlbumUserEmailFilter && hasAlbumTitleFilter && hasTitleFilter) {
-      const { photosIntersect, albumsIntersect, usersIntersect } = intersectData(photosFiltered, albumsFiltered, usersFiltered)
 
       dataEnriched = dataEnrichment(photosIntersect, albumsIntersect, usersIntersect)
     }
@@ -159,8 +161,9 @@ router.get('/', filterQueryParam, async(req, res, next) => {
       dataEnriched = dataEnrichment(photosFiltered, albumsFiltered, usersFiltered)
     }
 
+    const finalData = pagination(dataEnriched, filters[OFFSET_FILTER], filters[LIMIT_FILTER])
 
-    res.status(200).send(dataEnriched)
+    res.status(200).send(finalData)
     return
   } catch (err) {
     next(err)

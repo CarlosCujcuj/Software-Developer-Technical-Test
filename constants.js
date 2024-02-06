@@ -15,5 +15,7 @@ module.exports = {
   EMAIL_KEY: 'email',
   ALBUM_USER_EMAIL_FILTER: 'album.user.email',
   ALBUM_TITLE_FILTER: 'album.title',
-  TITLE_FILTER: 'title'
+  TITLE_FILTER: 'title',
+  OFFSET_FILTER: 'offset',
+  LIMIT_FILTER: 'limit'
 }
