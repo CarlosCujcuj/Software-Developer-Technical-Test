@@ -10,5 +10,10 @@ module.exports = {
   USERS_SERVICE_URL,
   ID_KEY: 'id',
   ALBUM_ID_KEY: 'albumId',
-  USER_ID_KEY: 'userId'
+  USER_ID_KEY: 'userId',
+  TITLE_KEY: 'title',
+  EMAIL_KEY: 'email',
+  ALBUM_USER_EMAIL_FILTER: 'album.user.email',
+  ALBUM_TITLE_FILTER: 'album.title',
+  TITLE_FILTER: 'title'
 }

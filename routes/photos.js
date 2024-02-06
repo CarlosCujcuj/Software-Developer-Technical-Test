@@ -1,21 +1,36 @@
 'use strict'
 const { Router } = require('express')
 const createError = require('http-errors')
+
+const dataEnrichment = require('../utils/dataEnrichment')
+const intersectData = require('../utils/intersectData')
+const {
+  getUniqueValues,
+  filterItemsContainingValue,
+  filterItemsWithEqualValue
+} = require('../utils/filters')
+const {
+  request,
+  requestServiceById
+} = require('../utils/requests')
 const {
   PHOTOS_SERVICE_URL,
   ALBUMS_SERVICE_URL,
   USERS_SERVICE_URL,
   ALBUM_ID_KEY,
   USER_ID_KEY,
-  ID_KEY
+  ID_KEY,
+  TITLE_KEY,
+  EMAIL_KEY,
+  ALBUM_USER_EMAIL_FILTER,
+  ALBUM_TITLE_FILTER,
+  TITLE_FILTER
 } = require('../constants')
-const statusHandler = require('../statusHandler')
-const dataEnrichment = require('../utils/dataEnrichment')
 
 const router = Router()
 // const signal = AbortSignal.timeout(1250)
 
-const filterOptions = ['title', 'album.title', 'album.user.email']
+const filterOptions = [ALBUM_USER_EMAIL_FILTER, ALBUM_TITLE_FILTER, TITLE_FILTER]
 
 const filterQueryParam = (req, res, next) => {
   const filterOption = filterOptions.find(filter => req.query.hasOwnProperty(filter)) // undefined
@@ -24,120 +39,132 @@ const filterQueryParam = (req, res, next) => {
     next(createError(400, 'Invalid Filter Option'))
     return
   }
-
-  req.filterOption = filterOption
   next()
 }
 
-const request = async (url) => {
-  try {
-    // console.log('==url: ', url)
-    const response = await fetch(`${url}`)
-    statusHandler(response)
-    const responseJson = await response.json()
-    /* if (url.includes('albums')) {
-      console.log('===response: ', responseJson)
-    } */
-    return responseJson
-  } catch (err) {
-    throw err
-  }
-  
-}
-
-const requestServiceById = async (baseURL, id) => {
-  try {
-    const url = `${baseURL}/${id}`
-    const response = await request(url)
-    return response
-  } catch (err) {
-    throw err
-  }
-}
-
-const getUniqueValues = async (array, value) => {
-  const uniqueValues = new Set(array.map(item => item[value]))
-  return Array.from(uniqueValues)
-}
-
-const filterItemsByString = (array, key, filterStr) => {
-  return array.filter(item => item[key].toLowerCase().includes(filterStr.toLowerCase()));
-}
-
-
 router.get('/', filterQueryParam, async(req, res, next) => {
-  const filterOption = req.filterOption
-  const filterStr = req.query[filterOption]
+  let dataEnriched
+  const queryFilters = req.query
 
-  if (filterOption === filterOptions[0]) {
-    try {
-      const photoResponse = await request(PHOTOS_SERVICE_URL)
-      const photos = photoResponse.filter(item => item.title.toLowerCase().includes(filterStr.toLowerCase()))
+  const hasAlbumUserEmailFilter = queryFilters.hasOwnProperty(ALBUM_USER_EMAIL_FILTER)
+  const hasAlbumTitleFilter = queryFilters.hasOwnProperty(ALBUM_TITLE_FILTER)
+  const hasTitleFilter = queryFilters.hasOwnProperty(TITLE_FILTER)
+
+  let usersResponse
+  let albumsResponse
+  let photosResponse
+
+  let usersFiltered
+  let albumsFiltered
+  let photosFiltered
 
 
-      const albumsId = await getUniqueValues(photos, ALBUM_ID_KEY)
-      const albumsResponse = await Promise.all(
+  try {
+    // ======= REQUEST & FILTERING =======
+
+    // The request to /photos is always made no matter wich filter you use, 
+    photosResponse = await request(PHOTOS_SERVICE_URL)
+
+    if (hasTitleFilter) {
+      photosFiltered = filterItemsContainingValue(photosResponse, TITLE_KEY, filters[TITLE_FILTER])
+    }
+    
+    if (hasAlbumUserEmailFilter) {
+      // The request to /users is always made
+      usersResponse = await request(USERS_SERVICE_URL)
+      usersFiltered = filterItemsWithEqualValue(usersResponse, EMAIL_KEY, filters[ALBUM_USER_EMAIL_FILTER])
+    }
+
+    if (hasAlbumTitleFilter) {
+      // The request to /albums is always made
+      albumsResponse = await request(ALBUMS_SERVICE_URL)
+      albumsFiltered = filterItemsContainingValue(albumsResponse, TITLE_KEY, filters[ALBUM_TITLE_FILTER])
+    }
+
+
+    // ======= LOGIC FOR FILTER'S COMBINATIONS =======
+
+    if (hasAlbumTitleFilter && hasTitleFilter) {
+      const { photosIntersect, albumsIntersect } = intersectData(photosFiltered, albumsFiltered, undefined)
+
+      const usersId = await getUniqueValues(albumsIntersect, USER_ID_KEY)
+      usersResponse = await Promise.all(
+        usersId.map(id => requestServiceById(USERS_SERVICE_URL, id))
+      )
+
+      dataEnriched = dataEnrichment(photosIntersect, albumsIntersect, usersResponse)
+    }
+
+
+    else if (hasAlbumUserEmailFilter && hasAlbumTitleFilter) {
+      const { photosIntersect, albumsIntersect, usersIntersect } = intersectData(photosResponse, albumsFiltered, usersFiltered)
+
+      dataEnriched = dataEnrichment(photosIntersect, albumsIntersect, usersIntersect)
+    }
+
+
+    else if (hasAlbumUserEmailFilter && hasTitleFilter) {
+      albumsResponse = await request(ALBUMS_SERVICE_URL)
+      const { photosIntersect, albumsIntersect, usersIntersect } = intersectData(photosFiltered, albumsResponse, usersFiltered)
+
+      dataEnriched = dataEnrichment(photosIntersect, albumsIntersect, usersIntersect)
+    }
+
+
+    else if (hasAlbumUserEmailFilter && hasAlbumTitleFilter && hasTitleFilter) {
+      const { photosIntersect, albumsIntersect, usersIntersect } = intersectData(photosFiltered, albumsFiltered, usersFiltered)
+
+      dataEnriched = dataEnrichment(photosIntersect, albumsIntersect, usersIntersect)
+    }
+
+
+    // ===== SINGLE FILTERS =====
+    else if (hasTitleFilter) {
+      const albumsId = await getUniqueValues(photosFiltered, ALBUM_ID_KEY)
+      albumsResponse = await Promise.all(
         albumsId.map(id => requestServiceById(ALBUMS_SERVICE_URL, id))
       )
 
-
       const usersId = await getUniqueValues(albumsResponse, USER_ID_KEY)
+      usersResponse = await Promise.all(
+        usersId.map(id => requestServiceById(USERS_SERVICE_URL, id))
+      )
+
+      dataEnriched = await dataEnrichment(photosFiltered, albumsResponse, usersResponse)
+    }
+
+    else if (hasAlbumTitleFilter) {
+      const albumsId = await getUniqueValues(albumsFiltered, ID_KEY)
+      
+      const usersId = await getUniqueValues(albumsFiltered, USER_ID_KEY)
       const usersResponse = await Promise.all(
         usersId.map(id => requestServiceById(USERS_SERVICE_URL, id))
       )
 
-      const dataEnriched = await dataEnrichment(photos, albumsResponse, usersResponse)
-      res.status(200).send(dataEnriched)
-      return 
-    } catch (err) {
-      next(err)
-      return
+      photosFiltered = photosResponse.filter(photo => albumsId.includes(photo.albumId))
+
+      dataEnriched = dataEnrichment(photosFiltered, albumsFiltered, usersResponse)
     }
-    
-  } else if (filterOption === filterOptions[1]) {
-    try {
-      const albumsResponse = await request(ALBUMS_SERVICE_URL)
-      const albums = albumsResponse.filter(item => item.title.toLowerCase().includes(filterStr.toLowerCase()))
-      const albumsId = await getUniqueValues(albums, ID_KEY)
 
-      const usersId = await getUniqueValues(albums, USER_ID_KEY)
-      const usersResponse = await Promise.all(
-        usersId.map(id => requestServiceById(USERS_SERVICE_URL, id))
-      )
 
-      const photoResponse = await request(PHOTOS_SERVICE_URL)
-      const photos = photoResponse.filter(photo => albumsId.includes(photo.albumId))
-
-      const dataEnriched = dataEnrichment(photos, albums, usersResponse)
-    
-      res.status(200).send(dataEnriched)
-      return
-    } catch (err) {
-      next(err)
-      return
-    }
-  } else if (filterOption === filterOptions[2]) {
-    try {
-      const usersResponse = await request(USERS_SERVICE_URL)
-      const users = usersResponse.filter(item => item.email === filterStr)
-      const usersId = await getUniqueValues(users, ID_KEY)
+    else if (hasAlbumUserEmailFilter) {
+      const usersId = await getUniqueValues(usersFiltered, ID_KEY)
 
       const albumsResponse = await request(ALBUMS_SERVICE_URL)
-      const albums = albumsResponse.filter(album => usersId.includes(album.userId))
-      const albumsId = await getUniqueValues(albums, ID_KEY)
+      albumsFiltered = albumsResponse.filter(album => usersId.includes(album.userId))
+      const albumsId = await getUniqueValues(albumsFiltered, ID_KEY)
 
-      const photoResponse = await request(PHOTOS_SERVICE_URL)
-      const photos = photoResponse.filter(photo => albumsId.includes(photo.albumId))
+      photosFiltered = photosResponse.filter(photo => albumsId.includes(photo.albumId))
 
-      const dataEnriched = dataEnrichment(photos, albums, usersResponse)
-    
-      res.status(200).send(dataEnriched)
-
-      return
-    } catch (err) {
-      next(err)
-      return
+      dataEnriched = dataEnrichment(photosFiltered, albumsFiltered, usersFiltered)
     }
+
+
+    res.status(200).send(dataEnriched)
+    return
+  } catch (err) {
+    next(err)
+    return
   }
 
 })
@@ -145,42 +172,18 @@ router.get('/', filterQueryParam, async(req, res, next) => {
 router.get('/:id', async(req, res, next) => {
   const id = req.params.id
 
-  const photosReq = await fetch(`${PHOTOS_SERVICE_URL}/${id}`)
-  statusHandler(photosReq, next)
-  const photosReqJson = await photosReq.json()
-
-
-  const albumsReq = await fetch(`${ALBUMS_SERVICE_URL}/${photosReqJson.albumId}`)
-  statusHandler(albumsReq, next)
-  const albumsReqJson = await albumsReq.json()
-
-
-  const usersReq = await fetch(`${USERS_SERVICE_URL}/${albumsReqJson.userId}`)
-  statusHandler(usersReq, next)
-  const usersReqJson = await usersReq.json()
-
-  // remove unnecessary ids in a different way
-  const userRes = {
-    user: {
-      ...usersReqJson
-    }
+  try{
+    const photosResponse = await requestServiceById(PHOTOS_SERVICE_URL, id)
+    const albumsResponse = await requestServiceById(ALBUMS_SERVICE_URL, photosResponse.albumId)
+    const usersResponse = await requestServiceById(USERS_SERVICE_URL, albumsResponse.userId)
+    
+    const dataEnriched = await dataEnrichment([photosResponse], [albumsResponse], [usersResponse])
+    res.status(200).send(dataEnriched)
+    return
+  } catch (err) {
+    next(err)
+    return
   }
-
-  delete albumsReqJson.userId
-  const albumRes = {
-    album: {
-      ...albumsReqJson,
-      ...userRes
-    }
-  }
-
-  delete photosReqJson.albumId
-  const photosRes = {
-    ...photosReqJson,
-    ...albumRes
-  }
-
-  res.status(200).send(photosRes)
 })
 
 module.exports = router
